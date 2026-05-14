@@ -1,0 +1,89 @@
+version: "3.9"
+
+services:
+  # Traefik reverse proxy configuration
+  traefik:
+    image: docker.io/library/traefik:v${TRAEFIK_VERSION:-latest}
+    container_name: traefik
+    ports:
+      - "80:80" # The port for HTTP traffic (in my case using this as Cloudflare tunnel agent handles TLS and mTLS termination sending HTTP requests to Traefik)
+      # - "443:443" # Uncomment if you want to enable HTTPS with Traefik's built-in ACME support
+    volumes:
+      - ${PODMAN_SOCK}:/var/run/docker.sock:z
+      - ${ACME_JSON_PATH}:/acme.json:z
+      - ${TRAEFIK_YAML_PATH}:/etc/traefik/traefik.yml:ro,z
+    networks:
+      - services
+    env_file:
+      - ./.env
+    restart: always
+    security_opt:
+      - no-new-privileges:true
+    labels:
+      # Enabling Traefik for this container and setting up the dashboard route
+      - "traefik.enable=true"
+      - "traefik.http.routers.traefik.rule=Host(`${LOCAL_IP}`) && (PathPrefix(`/dashboard`) || PathPrefix(`/api`))"
+      - "traefik.http.routers.traefik.entrypoints=web" # Use "websecure" if you have HTTPS enabled
+      - "traefik.http.routers.traefik.service=api@internal" # This tells Traefik to use its internal API service for the dashboard
+
+      # Middleware to redirect /dashboard to /dashboard/ for proper routing - It is a bug in Traefik when using currently
+      - "traefik.http.middlewares.local-slash.redirectregex.regex=^(.*)/dashboard$$"
+      - "traefik.http.middlewares.local-slash.redirectregex.replacement=$${1}/dashboard/"
+
+      # Basic authentication middleware for the dashboard
+      - "traefik.http.middlewares.auth.basicauth.users=${AUTH_HASHED_USER}"
+      - "traefik.http.routers.traefik.middlewares=auth,local-slash"
+
+  # Cloudflare Tunnel configuration
+  cloudflared:
+    image: docker.io/cloudflare/cloudflared:latest
+    container_name: cloudflared
+    restart: always
+    command: tunnel --no-autoupdate run # Using --no-autoupdate to prevent automatic updates which can cause issues in some environments, adjust as needed
+    environment:
+      - TUNNEL_TOKEN=${CLOUDFLARE_TUNNEL_TOKEN} # Token for authenticating with Cloudflare, set it in the ENV file
+    volumes:
+      - ${CLOUDFLARED_PATH}:/etc/cloudflared:ro,z
+    networks:
+      - services
+
+  # Optional: ngrok configuration (uncomment if you want to use ngrok instead of Cloudflare Tunnel)
+  # ngrok:
+  #   image: docker.io/ngrok/ngrok:latest
+  #   container_name: ngrok
+  #   restart: always
+  #   command:
+  #   - "http"
+  #   - "--url=${NGROK_URL}"
+  #   - "traefik:80"
+  #   env_file:
+  #     - ./ngrok/.env
+  #   depends_on:
+  #     - traefik
+  #   networks:
+  #     - services
+
+  # Optional: Error pages service for custom error handling in Traefik - Given a beautiful error page for all 4xx and 5xx errors
+  error-pages:
+    image: ghcr.io/tarampampam/error-pages:3
+    environment:
+      TEMPLATE_NAME: lost-in-space
+    restart: always
+    labels:
+      # Enable Traefik for this container and set up a catch-all router for error pages
+      traefik.enable: true
+      traefik.http.routers.error-pages-router.rule: HostRegexp(`.+`)
+      traefik.http.routers.error-pages-router.priority: 10
+      traefik.http.routers.error-pages-router.entrypoints: web
+      traefik.http.routers.error-pages-router.middlewares: error-pages-middleware
+      # "errors" middleware settings
+      traefik.http.middlewares.error-pages-middleware.errors.status: 400-599
+      traefik.http.middlewares.error-pages-middleware.errors.service: error-pages-service
+      traefik.http.middlewares.error-pages-middleware.errors.query: /{status}.html
+      # define service properties
+      traefik.http.services.error-pages-service.loadbalancer.server.port: 8080
+
+# Define the external network that Traefik and other services will use to communicate, used to bifurcate the network from the host and other services for better isolation and security
+networks:
+  services:
+    external: true

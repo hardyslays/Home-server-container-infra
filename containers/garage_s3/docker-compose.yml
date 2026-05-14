@@ -1,0 +1,27 @@
+name: garage_s3
+
+services:
+  # Garage S3 service configuration
+  garage_s3:
+    container_name: garage_s3
+    image: docker.io/dxflrs/garage:v2.2.0
+    volumes:
+      - ${GARAGE_CONFIG_PATH}:/etc/garage.toml
+      - ${GARAGE_META_PATH}:/var/lib/garage/meta
+      - ${GARAGE_DATA_PATH}:/var/lib/garage/data
+    env_file:
+      - .env
+    ports:
+      - '3900:3900'
+      - '3901:3901'
+      - '3902:3902'
+      - '3903:3903'
+    restart: unless-stopped
+    healthcheck:
+      disable: false
+    # networks:
+    #   - services
+
+# networks:
+#   services:
+#     external: true

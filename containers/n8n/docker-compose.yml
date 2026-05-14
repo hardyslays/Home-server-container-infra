@@ -1,0 +1,42 @@
+name: n8n
+
+services:
+ # N8N service configuration
+  n8n:
+    container_name: n8n
+    image: docker.n8n.io/n8nio/n8n
+    restart: always
+    networks:
+      - services
+    ports:
+      - "5678:5678" # Expose the n8n service on port 5678, this is the default port n8n listens on
+    labels:
+      # Enable Traefik for this container and set up routing rules to serve n8n at the specified domain
+      - traefik.enable=true
+      - traefik.http.routers.n8n.rule=Host(`${N8N_BASE_URL}`)
+      - traefik.http.routers.n8n.entrypoints=web
+      - traefik.http.services.n8n.loadbalancer.server.port=5678
+    environment:
+      - N8N_ENFORCE_SETTINGS_FILE_PERMISSIONS=false # Disable strict permissions check for the settings file, useful in environments where permissions might be altered
+      - N8N_HOST=${N8N_BASE_URL} # Set the host for n8n to the base URL, this is important for generating correct URLs in the UI and for webhooks
+      - N8N_PORT=5678 # Set the port n8n listens on, should match the port exposed in the container
+      - N8N_PROTOCOL=http # Protocol is set to http, Traefik will handle the SSL termination and serve n8n over https
+      - N8N_SECURE_COOKIE=false # Disabled secure cookies since Traefik is handling SSL termination, this allows cookies to work correctly when served over https by Traefik
+      - WEBHOOK_URL=https://${N8N_BASE_URL}/
+      - N8N_RUNNERS_ENABLED=true
+      - NODE_ENV=production
+      - GENERIC_TIMEZONE=${GENERIC_TIMEZONE}
+      - TZ=${GENERIC_TIMEZONE}
+      - N8N_PROXY_HOPS=1
+    volumes:
+      - ${N8N_DATA_LOCATION}:/home/node/.n8n:Z
+      - ${N8N_FILES_LOCATION}:/files:Z
+
+# Setup a volume for N8N, this is where all the data will be stored, including credentials, workflows, and other configurations. Make sure to set the N8N_DATA_LOCATION variable in your .env file to point to a directory on your host machine where you want this data to be stored persistently. This allows you to keep your N8N data safe even if the container is recreated or updated. The :Z option ensures that the correct SELinux context is applied for security when running on systems with SELinux enabled.
+volumes:
+  n8n_data:
+
+# Define the external network that Traefik and other services will use to communicate, used to bifurcate the network from the host and other services for better isolation and security
+networks:
+  services:
+    external: true

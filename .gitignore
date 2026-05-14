@@ -1,0 +1,9 @@
+.env
+env/
+
+# Volumes sub-directory
+volumes/*/*/
+
+# Ignore garage S3 config and data
+containers/garage_s3/*
+volumes/garage/
